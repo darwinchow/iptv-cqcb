@@ -8,7 +8,7 @@ export async function onRequest({ request, params }) {
   // 查找KV，并检查KV里的数据是否过期
   let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
   let currentTime = new Date().getTime();
-  let cacheDuration = 30 * 60 * 1000; // 30分钟
+  let cacheDuration = 60 * 60 * 1000; // 60分钟
 
   if (geo.regionCode === 'CN-CQ') {
     if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < cacheDuration) {
@@ -80,10 +80,12 @@ export async function onRequest({ request, params }) {
       );
       let playResponse = await fetch(playRequest);
 
+      let timestamp_lastmodified = new Date(playResponse.headers.get('Last-Modified')).getTime()
+
       // 写入KV存储
       cachedData.liveUrl = {
         url: playResponse.headers.get('Location'),
-        timestamp: currentTime,
+        timestamp: timestamp_lastmodified,
       };
 
       if (cachedData.liveUrl.url) {
