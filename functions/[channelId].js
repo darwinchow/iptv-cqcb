@@ -8,7 +8,7 @@ export async function onRequest({ request, params }) {
   // 查找KV，并检查KV里的数据是否过期
   let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
   let currentTime = new Date().getTime();
-  let cacheDuration = 60 * 60 * 1000; // 60分钟
+  let cacheDuration = 1800000; // 30分钟
 
   if (geo.regionCode === 'CN-CQ') {
     if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < cacheDuration) {
