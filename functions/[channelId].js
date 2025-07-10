@@ -76,6 +76,9 @@ export async function onRequest({ request, params }) {
         {
           method: 'GET',
           redirect: 'manual',
+          headers: {
+            'X-Forwarded-For': request.eo.clientIp
+          }
         }
       );
       let playResponse = await fetch(playRequest);
