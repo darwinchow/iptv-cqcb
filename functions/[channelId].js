@@ -1,4 +1,4 @@
-export async function onRequest({ request, params }) {
+export async function onRequest({ request, params, env }) {
   const geo = request.eo.geo;
   const channelId = params.channelId || 'cctv1HD';
   const cacheChannelId = channelId.toLowerCase();
@@ -8,10 +8,10 @@ export async function onRequest({ request, params }) {
   // 查找KV，并检查KV里的数据是否过期
   let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
   let currentTime = new Date().getTime();
-  let cacheDuration = 1800000; // 30分钟
+  let currentTimeString = currentTime.toString();
 
   if (geo.regionCode === 'CN-CQ') {
-    if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < cacheDuration) {
+    if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < env.CACHE_DURATION) {
       // 如果缓存存在且未过期，使用缓存的播放地址
       redirectUrl = cachedData.playUrl.url;
     } else {
@@ -25,17 +25,15 @@ export async function onRequest({ request, params }) {
       };
 
       //计算签名
-      let secretKey = 'aIErXY1rYjSpjQs7pq2Gp5P8k2W7P^Y@';
-      let timestamp = new Date().getTime().toString();
       let signatureBody = {
         ...requestBody,
         appId: 'kdds-chongqingdemo',
-        timestamps: timestamp,
+        timestamps: currentTimeString,
       }
 
-      let sortedSignatureKeys = Object.keys(signatureBody).sort();
-      let stringToSign = secretKey + sortedSignatureKeys.map(key => `${key}${signatureBody[key]}`).join('');
-      let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(stringToSign))));
+      let sortedSignatureBodyKeys = Object.keys(signatureBody).sort();
+      let signatureBodyString = atob(env.CBNAPI_SECRET_KEY) + sortedSignatureBodyKeys.map(key => `${key}${signatureBody[key]}`).join('');
+      let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
       // 发起请求
       let playRequest = new Request(
@@ -44,7 +42,7 @@ export async function onRequest({ request, params }) {
           method: 'GET',
           headers: {
             'appId': signatureBody.appId,
-            'timestamps': timestamp,
+            'timestamps': currentTimeString,
             'sign': signature,
           },
         }
@@ -66,18 +64,29 @@ export async function onRequest({ request, params }) {
     }
   } else {
     // 重庆以外地区
-    if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < cacheDuration) {
+    if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < env.CACHE_DURATION) {
       // 如果缓存存在且未过期，使用缓存的直播地址
       redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
     } else {
       // 如果缓存不存在或已过期，重新获取直播地址
+      let requestSignatureBody = {
+        timestamp: currentTimeString,
+        clientIp: request.eo.clientIp,
+        channelId: channelId
+      };
+      let sortedRequestSignatureBodyKeys = Object.keys(requestSignatureBody).sort();
+      let requestSignatureBodyString = atob(env.REMOTEAPI_SECRET_KEY) + sortedRequestSignatureBodyKeys.map(key => `${key}${requestSignatureBody[key]}`).join('');
+      let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(requestSignatureBodyString))));
+
       let playRequest = new Request(
-        `https://cq.cqcb.live.iptv.darwinchow.com/?channelId=${channelId}`,
+        env.REMOTEAPI_URL + channelId,
         {
           method: 'GET',
           redirect: 'manual',
           headers: {
-            'X-Forwarded-For': request.eo.clientIp
+            'X-Forwarded-For': request.eo.clientIp,
+            'X-Timestamp': currentTimeString,
+            'X-Signature': requestSignature,
           }
         }
       );
