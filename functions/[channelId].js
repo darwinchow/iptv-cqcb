@@ -33,7 +33,7 @@ export async function onRequest({ request, params, env }) {
       }
 
       let sortedSignatureBodyKeys = Object.keys(signatureBody).sort();
-      let signatureBodyString = btoa(env.CBNAPI_SECRET_KEY) + sortedSignatureBodyKeys.map(key => `${key}${signatureBody[key]}`).join('');
+      let signatureBodyString = atob(env.CBNAPI_SECRET_KEY) + sortedSignatureBodyKeys.map(key => `${key}${signatureBody[key]}`).join('');
       let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
       // 发起请求
@@ -76,7 +76,7 @@ export async function onRequest({ request, params, env }) {
         channelId: channelId
       };
       let sortedRequestSignatureBodyKeys = Object.keys(requestSignatureBody).sort();
-      let requestSignatureBodyString = btoa(env.REMOTEAPI_SECRET_KEY) + sortedRequestSignatureBodyKeys.map(key => `${key}${requestSignatureBody[key]}`).join('');
+      let requestSignatureBodyString = atob(env.REMOTEAPI_SECRET_KEY) + sortedRequestSignatureBodyKeys.map(key => `${key}${requestSignatureBody[key]}`).join('');
       let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(requestSignatureBodyString))));
 
       let playRequest = new Request(
