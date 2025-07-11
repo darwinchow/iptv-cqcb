@@ -9,10 +9,9 @@ export async function onRequest({ request, params, env }) {
   let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
   let currentTime = new Date().getTime();
   let currentTimeString = currentTime.toString();
-  let cacheDuration = 1800000; // 30分钟
 
   if (geo.regionCode === 'CN-CQ') {
-    if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < cacheDuration) {
+    if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < env.CACHE_DURATION) {
       // 如果缓存存在且未过期，使用缓存的播放地址
       redirectUrl = cachedData.playUrl.url;
     } else {
@@ -65,7 +64,7 @@ export async function onRequest({ request, params, env }) {
     }
   } else {
     // 重庆以外地区
-    if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < cacheDuration) {
+    if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < env.CACHE_DURATION) {
       // 如果缓存存在且未过期，使用缓存的直播地址
       redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
     } else {
