@@ -5,18 +5,15 @@ export async function onRequest({ request, params, env }) {
 
   let redirectUrl = null;
 
-  // 查找KV，并检查KV里的数据是否过期
+  // Get the cached data from KV
   let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
-  let currentTime = new Date().getTime();
+  let currentTime = Date.now();
   let currentTimeString = currentTime.toString();
 
   if (geo.regionCode === 'CN-CQ') {
     if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < env.CACHE_DURATION) {
-      // 如果缓存存在且未过期，使用缓存的播放地址
       redirectUrl = cachedData.playUrl.url;
     } else {
-      // 如果缓存不存在或已过期，重新获取播放地址
-      // 请求参数
       let requestBody = {
         cityId: '5A',
         playId: channelId,
@@ -24,7 +21,6 @@ export async function onRequest({ request, params, env }) {
         type: 1,
       };
 
-      //计算签名
       let signatureBody = {
         ...requestBody,
         appId: 'kdds-chongqingdemo',
@@ -35,7 +31,6 @@ export async function onRequest({ request, params, env }) {
       let signatureBodyString = atob(env.CBNAPI_SECRET_KEY) + sortedSignatureBodyKeys.map(key => `${key}${signatureBody[key]}`).join('');
       let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
-      // 发起请求
       let playRequest = new Request(
         `https://portal.centre.live.cbncdn.cn/others/common/playUrlNoAuth?cityId=${requestBody.cityId}&playId=${requestBody.playId}&relativeId=${requestBody.relativeId}&type=${requestBody.type}`,
         {
@@ -50,61 +45,63 @@ export async function onRequest({ request, params, env }) {
 
       let playResponse = await fetch(playRequest);
 
-      // 写入KV存储
-      cachedData.playUrl = {
-        url: (await playResponse.json()).data.result.protocol[0].transcode[0].url,
-        timestamp: currentTime,
-      };
+      if (playResponse.status === 200) {
+        cachedData.playUrl = {
+          url: (await playResponse.json()).data.result.protocol[0].transcode[0].url,
+          timestamp: currentTime,
+        };
 
-      if (cachedData.playUrl.url) {
-        iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+        if (cachedData.playUrl.url) {
+          iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+        }
+
+        redirectUrl = cachedData.playUrl.url;
+      } else {
+        return errorResponse(playResponse.status, playResponse.statusText);
       }
-
-      redirectUrl = cachedData.playUrl.url;
     }
   } else {
-    // 重庆以外地区
     if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < env.CACHE_DURATION) {
-      // 如果缓存存在且未过期，使用缓存的直播地址
       redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
     } else {
-      // 如果缓存不存在或已过期，重新获取直播地址
+      // Use Tencent Cloud EdgeOne Token Authentication Method V
       let requestSignatureBody = {
-        timestamp: currentTimeString,
-        clientIp: request.eo.clientIp,
-        channelId: channelId
+        KEY: env.REMOTEAPI_SECRET_KEY,
+        Path: env.REMOTEAPI_URL.match(/^(https?:\/\/[^\/]+)(\/[^?]+)/)[2],
+        t: Math.floor(currentTime / 1000).toString(16),
+        whip: request.eo.clientIp,
       };
-      let sortedRequestSignatureBodyKeys = Object.keys(requestSignatureBody).sort();
-      let requestSignatureBodyString = atob(env.REMOTEAPI_SECRET_KEY) + sortedRequestSignatureBodyKeys.map(key => `${key}${requestSignatureBody[key]}`).join('');
-      let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(requestSignatureBodyString))));
+      let requestSignatureBodyString = Object.keys(requestSignatureBody).map(key => `${requestSignatureBody[key]}`).join('');
+      let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'SHA-1' }, TextEncoder().encode(requestSignatureBodyString))));
 
       let playRequest = new Request(
-        env.REMOTEAPI_URL + channelId,
+        env.REMOTEAPI_URL + `${channelId}&t=${requestSignatureBody.t}&whip=${requestSignatureBody.whip}&sign=${requestSignature}`,
         {
           method: 'GET',
           redirect: 'manual',
           headers: {
             'X-Forwarded-For': request.eo.clientIp,
-            'X-Timestamp': currentTimeString,
-            'X-Signature': requestSignature,
           }
         }
       );
       let playResponse = await fetch(playRequest);
 
-      let timestamp_lastmodified = new Date(playResponse.headers.get('Last-Modified')).getTime()
+      if (playResponse.status === 302) {
+        let timestamp_lastmodified = new Date(playResponse.headers.get('Last-Modified')).getTime()
 
-      // 写入KV存储
-      cachedData.liveUrl = {
-        url: playResponse.headers.get('Location'),
-        timestamp: timestamp_lastmodified,
-      };
+        cachedData.liveUrl = {
+          url: playResponse.headers.get('Location'),
+          timestamp: timestamp_lastmodified,
+        };
 
-      if (cachedData.liveUrl.url) {
-        iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+        if (cachedData.liveUrl.url) {
+          iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+        }
+
+        redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
+      } else {
+        return errorResponse(playResponse.status, playResponse.statusText);
       }
-
-      redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
     }
   }
 
@@ -115,6 +112,21 @@ export async function onRequest({ request, params, env }) {
       headers: {
         'Location': redirectUrl,
         'Content-Type': 'application/vnd.apple.mpegurl',
+      },
+    }
+  );
+}
+
+function errorResponse(statusCode, message) {
+  return new Response(
+    JSON.stringify({
+      status: statusCode,
+      message: message,
+    }),
+    {
+      status: statusCode,
+      headers: {
+        'Content-Type': 'application/json',
       },
     }
   );
