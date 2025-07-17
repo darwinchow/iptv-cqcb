@@ -67,7 +67,7 @@ export async function onRequest({ request, params, env }) {
       // Use Tencent Cloud EdgeOne Token Authentication Method V
       let requestSignatureBody = {
         KEY: env.REMOTEAPI_SECRET_KEY,
-        Path: env.REMOTEAPI_URL.match(/^(https?:\/\/[^\/]+)(\/[^?]+)/)[2],
+        Path: env.REMOTEAPI_URL.match(/^https?:\/\/[^/]+(\/[^?]*)?/)[1] || '/',
         t: Math.floor(currentTime / 1000).toString(16),
         whip: request.eo.clientIp,
       };
