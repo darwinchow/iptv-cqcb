@@ -75,7 +75,7 @@ export async function onRequest({ request, params, env }) {
       let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'SHA-1' }, TextEncoder().encode(requestSignatureBodyString))));
 
       let playRequest = new Request(
-        env.REMOTEAPI_URL + `${channelId}&t=${requestSignatureBody.t}&whip=${requestSignatureBody.whip}&sign=${requestSignature}`,
+        env.REMOTEAPI_URL + `${channelId}&t=${requestSignatureBody.t}&sign=${requestSignature}`,
         {
           method: 'GET',
           redirect: 'manual',
