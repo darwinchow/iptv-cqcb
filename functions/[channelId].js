@@ -67,6 +67,9 @@ export async function onRequest({ request, params, env }) {
         {
           method: 'GET',
           redirect: 'manual',
+          headers: {
+            'Access-Key': env.PROXYAPI_ACCESS_KEY,
+          },
         }
       );
       let playResponse = await fetch(playRequest);
