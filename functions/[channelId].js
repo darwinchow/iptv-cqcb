@@ -20,7 +20,7 @@ export async function onRequest({ request, params, env }) {
         cityId: '5A',
         playId: channelId,
         relativeId: channelId,
-        type: '1',
+        type: 1,
       };
 
       let signatureBody = {
@@ -34,7 +34,7 @@ export async function onRequest({ request, params, env }) {
       let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
       let playRequest = new Request(
-        env.CBNAPI_URL + '?' + new URLSearchParams(requestBody).toString(),
+        env.CBNAPI_URL + '&' + new URLSearchParams(requestBody),
         {
           method: 'GET',
           headers: {
