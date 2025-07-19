@@ -6,14 +6,16 @@ export async function onRequest({ request, params, env }) {
   let redirectUrl = null;
 
   // Get the cached data from KV
-  let cachedData = await iptv_live_cqcb.get(cacheChannelId, "json") || {};
+  let cachedData = await kv_iptv_cqcb.get(cacheChannelId, "json") || {};
+  let cachedDataUpdatedTag = false;
   let currentTime = Date.now();
   let currentTimeString = currentTime.toString();
 
-  if (geo.regionCode === 'CN-CQ') {
-    if (cachedData.playUrl && currentTime - cachedData.playUrl.timestamp < env.CACHE_DURATION) {
-      redirectUrl = cachedData.playUrl.url;
-    } else {
+  if (geo.regionCode !== 'CN-CQ' && currentTime - cachedData.liveUrl?.timestamp < env.CACHE_DURATION) {
+    redirectUrl = cachedData.liveUrl?.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
+  } else {
+    if (!cachedData.playUrl || currentTime - cachedData.playUrl?.timestamp > env.CACHE_DURATION) {
+      // Cache is expired, get new data
       let requestBody = {
         cityId: '5A',
         playId: channelId,
@@ -32,7 +34,7 @@ export async function onRequest({ request, params, env }) {
       let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
       let playRequest = new Request(
-        `https://portal.centre.live.cbncdn.cn/others/common/playUrlNoAuth?cityId=${requestBody.cityId}&playId=${requestBody.playId}&relativeId=${requestBody.relativeId}&type=${requestBody.type}`,
+        env.CBNAPI_URL + '&' + new URLSearchParams(requestBody),
         {
           method: 'GET',
           headers: {
@@ -42,7 +44,6 @@ export async function onRequest({ request, params, env }) {
           },
         }
       );
-
       let playResponse = await fetch(playRequest);
 
       if (playResponse.status === 200) {
@@ -51,58 +52,45 @@ export async function onRequest({ request, params, env }) {
           timestamp: currentTime,
         };
 
-        if (cachedData.playUrl.url) {
-          iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
-        }
+        cachedDataUpdatedTag = true;
 
-        redirectUrl = cachedData.playUrl.url;
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
       }
     }
-  } else {
-    if (cachedData.liveUrl && currentTime - cachedData.liveUrl.timestamp < env.CACHE_DURATION) {
-      redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
-    } else {
-      // Use Tencent Cloud EdgeOne Token Authentication Method V
-      let requestSignatureBody = {
-        KEY: env.REMOTEAPI_SECRET_KEY,
-        Path: env.REMOTEAPI_URL.match(/^https?:\/\/[^/]+(\/[^?]*)?/)[1] || '/',
-        t: Math.floor(currentTime / 1000).toString(16),
-        whip: request.eo.clientIp,
-      };
-      let requestSignatureBodyString = Object.keys(requestSignatureBody).map(key => `${requestSignatureBody[key]}`).join('');
-      let requestSignature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'SHA-1' }, TextEncoder().encode(requestSignatureBodyString))));
 
+    if (geo.regionCode === 'CN-CQ') {
+      redirectUrl = cachedData.playUrl.url;
+    } else {
       let playRequest = new Request(
-        env.REMOTEAPI_URL + `${channelId}&t=${requestSignatureBody.t}&whip=${requestSignatureBody.whip}&sign=${requestSignature}`,
+        cachedData.playUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_URL),
         {
           method: 'GET',
           redirect: 'manual',
           headers: {
-            'X-Forwarded-For': request.eo.clientIp,
-          }
+            'Access-Key': env.PROXYAPI_ACCESS_KEY,
+          },
         }
       );
       let playResponse = await fetch(playRequest);
 
-      if (playResponse.status === 302) {
-        let timestamp_lastmodified = new Date(playResponse.headers.get('Last-Modified')).getTime()
-
+      if (playResponse.headers.has('Location')) {
         cachedData.liveUrl = {
           url: playResponse.headers.get('Location'),
-          timestamp: timestamp_lastmodified,
+          timestamp: cachedData.playUrl.timestamp,
         };
 
-        if (cachedData.liveUrl.url) {
-          iptv_live_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
-        }
+        cachedDataUpdatedTag = true;
 
-        redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, (Math.random() > 0.5 ? 'http://cqcu6.live.cbncdn.cn' : 'http://cqcu7.live.cbncdn.cn'));
+        redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
       }
     }
+  }
+
+  if (cachedDataUpdatedTag) {
+    await kv_iptv_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
   }
 
   return new Response(
@@ -111,7 +99,6 @@ export async function onRequest({ request, params, env }) {
       status: 302,
       headers: {
         'Location': redirectUrl,
-        'Content-Type': 'application/vnd.apple.mpegurl',
       },
     }
   );
