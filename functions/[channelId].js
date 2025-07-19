@@ -34,7 +34,7 @@ export async function onRequest({ request, params, env }) {
       let signature = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest({ name: 'MD5' }, TextEncoder().encode(signatureBodyString))));
 
       let playRequest = new Request(
-        env.CBNAPI_URL + `?cityId=${requestBody.cityId}&playId=${requestBody.playId}&relativeId=${requestBody.relativeId}&type=${requestBody.type}`,
+        env.CBNAPI_URL + '&' + new URLSearchParams(requestBody),
         {
           method: 'GET',
           headers: {
@@ -71,7 +71,7 @@ export async function onRequest({ request, params, env }) {
       );
       let playResponse = await fetch(playRequest);
 
-      if (playResponse.status === 302) {
+      if (playResponse.headers.has('Location')) {
         cachedData.liveUrl = {
           url: playResponse.headers.get('Location'),
           timestamp: cachedData.playUrl.timestamp,
