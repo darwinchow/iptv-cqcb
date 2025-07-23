@@ -5,16 +5,16 @@ export async function onRequest({ request, params, env }) {
 
   let redirectUrl = null;
 
-  // Get the cached data from KV
-  let cachedData = await kv_iptv_cqcb.get(cacheChannelId, "json") || {};
-  let cachedDataUpdatedTag = false;
+  // Get the cache data from KV
+  let cacheData = await kv_iptv_cqcb.get(cacheChannelId, "json") || {};
+  let cacheDataUpdatedTag = false;
   let currentTime = Date.now();
   let currentTimeString = currentTime.toString();
 
-  if (geo.regionCode !== 'CN-CQ' && currentTime - cachedData.liveUrl?.timestamp < env.CACHE_DURATION) {
-    redirectUrl = cachedData.liveUrl?.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
+  if (geo.regionCode !== 'CN-CQ' && currentTime - cacheData.liveUrl?.timestamp < env.CACHE_DURATION) {
+    redirectUrl = cacheData.liveUrl?.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
   } else {
-    if (!cachedData.playUrl || currentTime - cachedData.playUrl?.timestamp > env.CACHE_DURATION) {
+    if (!cacheData.playUrl || currentTime - cacheData.playUrl?.timestamp > env.CACHE_DURATION) {
       // Cache is expired, get new data
       let requestBody = {
         cityId: '5A',
@@ -47,12 +47,12 @@ export async function onRequest({ request, params, env }) {
       let playResponse = await fetch(playRequest);
 
       if (playResponse.status === 200) {
-        cachedData.playUrl = {
+        cacheData.playUrl = {
           url: (await playResponse.json()).data.result.protocol[0].transcode[0].url,
           timestamp: currentTime,
         };
 
-        cachedDataUpdatedTag = true;
+        cacheDataUpdatedTag = true;
 
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
@@ -60,10 +60,10 @@ export async function onRequest({ request, params, env }) {
     }
 
     if (geo.regionCode === 'CN-CQ') {
-      redirectUrl = cachedData.playUrl.url;
+      redirectUrl = cacheData.playUrl.url;
     } else {
       let playRequest = new Request(
-        cachedData.playUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_URL),
+        cacheData.playUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_URL),
         {
           method: 'GET',
           redirect: 'manual',
@@ -75,22 +75,22 @@ export async function onRequest({ request, params, env }) {
       let playResponse = await fetch(playRequest);
 
       if (playResponse.headers.has('Location')) {
-        cachedData.liveUrl = {
+        cacheData.liveUrl = {
           url: playResponse.headers.get('Location'),
-          timestamp: cachedData.playUrl.timestamp,
+          timestamp: cacheData.playUrl.timestamp,
         };
 
-        cachedDataUpdatedTag = true;
+        cacheDataUpdatedTag = true;
 
-        redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
+        redirectUrl = cacheData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
       }
     }
   }
 
-  if (cachedDataUpdatedTag) {
-    await kv_iptv_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+  if (cacheDataUpdatedTag) {
+    await kv_iptv_cqcb.put(cacheChannelId, JSON.stringify(cacheData));
   }
 
   return new Response(
