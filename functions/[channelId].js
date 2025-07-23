@@ -5,16 +5,17 @@ export async function onRequest({ request, params, env }) {
 
   let redirectUrl = null;
 
-  // Get the cached data from KV
-  let cachedData = await kv_iptv_cqcb.get(cacheChannelId, "json") || {};
-  let cachedDataUpdatedTag = false;
+  // Get the cache data from KV
+  let cacheData = await kv_iptv_cqcb.get(cacheChannelId, "json") || {};
+  let cacheDataUpdatedTag = false;
   let currentTime = Date.now();
   let currentTimeString = currentTime.toString();
 
-  if (geo.regionCode !== 'CN-CQ' && currentTime - cachedData.liveUrl?.timestamp < env.CACHE_DURATION) {
-    redirectUrl = cachedData.liveUrl?.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
+  let liveUrlNoCqcu = getLiveUrl(cacheData.liveUrl, ['tencent', 'baidu'], currentTime);
+  if (geo.regionCode !== 'CN-CQ' && liveUrlNoCqcu !== null) {
+    redirectUrl = getProxyLiveUrl(liveUrlNoCqcu);
   } else {
-    if (!cachedData.playUrl || currentTime - cachedData.playUrl?.timestamp > env.CACHE_DURATION) {
+    if (!cacheData.playUrl || currentTime > cacheData.playUrl?.expires) {
       // Cache is expired, get new data
       let requestBody = {
         cityId: '5A',
@@ -46,24 +47,20 @@ export async function onRequest({ request, params, env }) {
       );
       let playResponse = await fetch(playRequest);
 
-      if (playResponse.status === 200) {
-        cachedData.playUrl = {
-          url: (await playResponse.json()).data.result.protocol[0].transcode[0].url,
-          timestamp: currentTime,
-        };
-
-        cachedDataUpdatedTag = true;
-
+      let playUrl = (await playResponse.json()).data?.result?.protocol[0]?.transcode[0]?.url;
+      if (playUrl) {
+        setPlayUrl(cacheData, playUrl);
+        cacheDataUpdatedTag = true;
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
       }
     }
 
     if (geo.regionCode === 'CN-CQ') {
-      redirectUrl = cachedData.playUrl.url;
+      redirectUrl = cacheData.playUrl.url;
     } else {
       let playRequest = new Request(
-        cachedData.playUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_URL),
+        getProxyPlayUrl(cacheData.playUrl.url),
         {
           method: 'GET',
           redirect: 'manual',
@@ -75,22 +72,18 @@ export async function onRequest({ request, params, env }) {
       let playResponse = await fetch(playRequest);
 
       if (playResponse.headers.has('Location')) {
-        cachedData.liveUrl = {
-          url: playResponse.headers.get('Location'),
-          timestamp: cachedData.playUrl.timestamp,
-        };
+        setLiveUrl(cacheData, playResponse.headers.get('Location'));
+        cacheDataUpdatedTag = true;
 
-        cachedDataUpdatedTag = true;
-
-        redirectUrl = cachedData.liveUrl.url.replace(/^(https?:\/\/[^\/]+)/, env.PROXYAPI_LIVE_URL);
+        redirectUrl = getProxyLiveUrl(playResponse.headers.get('Location'));
       } else {
         return errorResponse(playResponse.status, playResponse.statusText);
       }
     }
   }
 
-  if (cachedDataUpdatedTag) {
-    await kv_iptv_cqcb.put(cacheChannelId, JSON.stringify(cachedData));
+  if (cacheDataUpdatedTag) {
+    await kv_iptv_cqcb.put(cacheChannelId, JSON.stringify(cacheData));
   }
 
   return new Response(
@@ -102,6 +95,70 @@ export async function onRequest({ request, params, env }) {
       },
     }
   );
+}
+
+function setPlayUrl(cacheData, url) {
+  let playUrlObject = new URL(url);
+  cacheData.playUrl = {
+    url: url,
+    expires: playUrlObject.searchParams.get('expires') * 1000 || Date.now() + 3600 * 1000,
+    timestamp: Date.now(),
+  };
+}
+
+function getProxyPlayUrl(url) {
+  let playUrlObject = new URL(url);
+  return playUrlObject.href.replace(playUrlObject.origin, env.PROXYAPI_URL);
+}
+
+function setLiveUrl(cacheData, url) {
+  let liveUrlObject = new URL(url);
+
+  if (!cacheData.liveUrl) {
+    cacheData.liveUrl = {};
+  }
+
+  if (liveUrlObject.hostname.startsWith('tencent')) {
+    cacheData.liveUrl.tencent = {
+      url: url,
+      expires: liveUrlObject.searchParams.get('t') * 1000 || Date.now() + 3600 * 1000,
+      timestamp: Date.now(),
+    };
+  } else if (liveUrlObject.hostname.startsWith('baidu')) {
+    cacheData.liveUrl.baidu = {
+      url: url,
+      expires: liveUrlObject.searchParams.get('timestamp') * 1000 || Date.now() + 3600 * 1000,
+      timestamp: Date.now(),
+    };
+  } else if (liveUrlObject.hostname.startsWith('cqcu')) {
+    cacheData.liveUrl.cqcu = {
+      url: url,
+      expires: Date.now() + 1800 * 1000,
+      timestamp: Date.now(),
+    };
+  }
+}
+
+function getLiveUrl(liveUrlObject, sources = ['tencent', 'baidu', 'cqcu'], timestamp = Date.now()) {
+  for (const source of sources) {
+    if (timestamp < liveUrlObject?.[source]?.expires) {
+      return liveUrlObject[source].url;
+    }
+  }
+  return null;
+}
+
+function getProxyLiveUrl(liveUrl) {
+  let liveUrlObject = new URL(liveUrl);
+  let proxyLiveUrl = liveUrl;
+  if (liveUrlObject.hostname.startsWith('tencent')) {
+    proxyLiveUrl = liveUrlObject.href.replace(liveUrlObject.origin, env.PROXYAPI_LIVE_TENCENT_URL);
+  } else if (liveUrlObject.hostname.startsWith('baidu')) {
+    proxyLiveUrl = liveUrlObject.href.replace(liveUrlObject.origin, env.PROXYAPI_LIVE_BAIDU_URL);
+  } else if (liveUrlObject.hostname.startsWith('cqcu')) {
+    proxyLiveUrl = liveUrlObject.href.replace(liveUrlObject.origin, env.PROXYAPI_LIVE_CQCU_URL);
+  }
+  return proxyLiveUrl;
 }
 
 function errorResponse(statusCode, message) {
