@@ -15,7 +15,7 @@ export async function onRequest({ request, params, env }) {
   if (geo.regionCode !== 'CN-CQ' && liveUrlNoCqcu !== null) {
     redirectUrl = getProxyLiveUrl(liveUrlNoCqcu);
   } else {
-    if (!cacheData.playUrl || currentTime > cacheData.playUrl?.expires) {
+    if (!(currentTime < cacheData.playUrl?.expires)) {
       // Cache is expired, get new data
       let requestBody = {
         cityId: '5A',
@@ -101,7 +101,7 @@ function setPlayUrl(cacheData, url) {
   let playUrlObject = new URL(url);
   cacheData.playUrl = {
     url: url,
-    expires: Date.now() + 3600 * 1000,
+    expires: playUrlObject.searchParams.get('expires') * 1000 || Date.now() + 3600 * 1000,
     timestamp: Date.now(),
   };
 }
