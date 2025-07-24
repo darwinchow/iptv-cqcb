@@ -101,7 +101,7 @@ function setPlayUrl(cacheData, url) {
   let playUrlObject = new URL(url);
   cacheData.playUrl = {
     url: url,
-    expires: playUrlObject.searchParams.get('expires') * 1000 || Date.now() + 3600 * 1000,
+    expires: Date.now() + 3600 * 1000,
     timestamp: Date.now(),
   };
 }
